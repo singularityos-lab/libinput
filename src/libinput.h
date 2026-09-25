@@ -6051,6 +6051,69 @@ libinput_device_config_scroll_get_default_natural_scroll_enabled(
 /**
  * @ingroup config
  *
+ * Singularity extension. Set the scroll direction of edge scrolling
+ * independently of two-finger scrolling. Until this is called, edge
+ * scrolling follows libinput_device_config_scroll_set_natural_scroll_enabled().
+ *
+ * Only touchpads support this.
+ *
+ * @param device The device to configure
+ * @param enable non-zero to enable natural edge scrolling, zero to disable it
+ *
+ * @return A config status code
+ */
+enum libinput_config_status
+libinput_device_config_scroll_set_edge_natural_scroll_enabled(
+	struct libinput_device *device,
+	int enable);
+
+/**
+ * @ingroup config
+ *
+ * Singularity extension.
+ *
+ * @param device The device to query
+ *
+ * @return Non-zero if edge scrolling uses the natural direction
+ */
+int
+libinput_device_config_scroll_get_edge_natural_scroll_enabled(
+	struct libinput_device *device);
+
+/**
+ * @ingroup config
+ *
+ * Singularity extension. Enable circular scrolling: a touch that started
+ * edge scrolling keeps scrolling when it leaves the edge and moves around
+ * the touchpad center, clockwise scrolling down on the right edge and
+ * counter-clockwise scrolling right on the bottom edge.
+ *
+ * Only touchpads with edge scrolling enabled support this.
+ *
+ * @param device The device to configure
+ * @param enable non-zero to enable circular scrolling, zero to disable it
+ *
+ * @return A config status code
+ */
+enum libinput_config_status
+libinput_device_config_scroll_set_circular_enabled(struct libinput_device *device,
+						   int enable);
+
+/**
+ * @ingroup config
+ *
+ * Singularity extension.
+ *
+ * @param device The device to query
+ *
+ * @return Non-zero if circular scrolling is enabled
+ */
+int
+libinput_device_config_scroll_get_circular_enabled(struct libinput_device *device);
+
+/**
+ * @ingroup config
+ *
  * Check if a device has a configuration that supports left-handed usage.
  *
  * @param device The device to configure
@@ -6466,6 +6529,10 @@ libinput_device_config_scroll_get_methods(struct libinput_device *device);
  * button is held down. If no button is set, i.e.
  * libinput_device_config_scroll_get_button() returns 0, scrolling
  * cannot activate.
+ *
+ * @note Singularity extension: touchpads that support both accept
+ * @ref LIBINPUT_CONFIG_SCROLL_2FG | @ref LIBINPUT_CONFIG_SCROLL_EDGE,
+ * scrolling with one finger along the edge and with two fingers anywhere.
  *
  * @param device The device to configure
  * @param method The scroll method for this device.

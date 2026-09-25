@@ -264,6 +264,7 @@ struct tp_touch {
 		int direction;
 		struct libinput_timer timer;
 		struct device_coords initial;
+		bool circular;
 	} scroll;
 
 	struct {
@@ -419,6 +420,8 @@ struct tp_dispatch {
 	struct {
 		struct libinput_device_config_scroll_method config_method;
 		enum libinput_config_scroll_method method;
+		int edge_natural; /* -1: follow natural scrolling */
+		bool circular;
 		int32_t right_edge;  /* in device coordinates */
 		int32_t bottom_edge; /* in device coordinates */
 		struct {

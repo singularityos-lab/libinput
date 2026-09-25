@@ -4788,12 +4788,14 @@ LIBINPUT_EXPORT enum libinput_config_status
 libinput_device_config_scroll_set_method(struct libinput_device *device,
 					 enum libinput_config_scroll_method method)
 {
-	/* Check method is a single valid method */
-	switch (method) {
+	/* Check method is a single valid method, or edge and two-finger
+	 * scrolling together */
+	switch ((unsigned int)method) {
 	case LIBINPUT_CONFIG_SCROLL_NO_SCROLL:
 	case LIBINPUT_CONFIG_SCROLL_2FG:
 	case LIBINPUT_CONFIG_SCROLL_EDGE:
 	case LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN:
+	case LIBINPUT_CONFIG_SCROLL_2FG | LIBINPUT_CONFIG_SCROLL_EDGE:
 		break;
 	default:
 		return LIBINPUT_CONFIG_STATUS_INVALID;

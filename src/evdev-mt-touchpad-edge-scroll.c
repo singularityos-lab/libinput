@@ -74,7 +74,7 @@ tp_touch_get_edge(const struct tp_dispatch *tp, const struct tp_touch *t)
 {
 	uint32_t edge = EDGE_NONE;
 
-	if (tp->scroll.method != LIBINPUT_CONFIG_SCROLL_EDGE)
+	if (!(tp->scroll.method & LIBINPUT_CONFIG_SCROLL_EDGE))
 		return EDGE_NONE;
 
 	if (t->point.x > tp->scroll.right_edge)
@@ -114,6 +114,7 @@ tp_edge_scroll_set_state(struct tp_dispatch *tp,
 	switch (state) {
 	case EDGE_SCROLL_TOUCH_STATE_NONE:
 		t->scroll.edge = EDGE_NONE;
+		t->scroll.circular = false;
 		break;
 	case EDGE_SCROLL_TOUCH_STATE_EDGE_NEW:
 		t->scroll.edge = tp_touch_get_edge(tp, t);
@@ -354,7 +355,7 @@ tp_edge_scroll_handle_state(struct tp_dispatch *tp, usec_t time)
 {
 	struct tp_touch *t;
 
-	if (tp->scroll.method != LIBINPUT_CONFIG_SCROLL_EDGE) {
+	if (!(tp->scroll.method & LIBINPUT_CONFIG_SCROLL_EDGE)) {
 		tp_for_each_touch(tp, t) {
 			if (t->state == TOUCH_BEGIN)
 				t->scroll.edge_state = EDGE_SCROLL_TOUCH_STATE_AREA;
@@ -390,7 +391,41 @@ tp_edge_scroll_handle_state(struct tp_dispatch *tp, usec_t time)
 			tp_edge_scroll_handle_event(tp, t, SCROLL_EVENT_RELEASE, time);
 			break;
 		}
+
+		/* With two-finger scrolling enabled too, a touch that has not
+		 * started edge scrolling yet belongs to the two-finger gesture
+		 * once another finger is down */
+		if ((tp->scroll.method & LIBINPUT_CONFIG_SCROLL_2FG) &&
+		    tp->nfingers_down > 1 &&
+		    t->scroll.edge_state == EDGE_SCROLL_TOUCH_STATE_EDGE_NEW)
+			tp_edge_scroll_set_state(tp,
+						 t,
+						 EDGE_SCROLL_TOUCH_STATE_AREA,
+						 time);
 	}
+}
+
+/* Scroll by the distance travelled along a circle around the touchpad
+ * center, clockwise positive, at the same scale as linear edge scrolling. */
+static double
+tp_edge_scroll_circular_delta(struct tp_dispatch *tp,
+			      const struct tp_touch *t,
+			      const struct normalized_coords *motion)
+{
+	const struct input_absinfo *ax = tp->device->abs.absinfo_x;
+	const struct input_absinfo *ay = tp->device->abs.absinfo_y;
+	struct device_coords center = {
+		.x = (ax->minimum + ax->maximum) / 2,
+		.y = (ay->minimum + ay->maximum) / 2,
+	};
+	struct normalized_coords radial =
+		tp_normalize_delta(tp, device_delta(t->point, center));
+	double radius = hypot(radial.x, radial.y);
+
+	if (radius < TP_MM_TO_DPI_NORMALIZED(5))
+		return 0.0;
+
+	return (motion->y * radial.x - motion->x * radial.y) / radius;
 }
 
 int
@@ -412,9 +447,15 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, usec_t time)
 		if (t->palm.state != PALM_NONE || tp_thumb_ignored(tp, t))
 			continue;
 
-		/* only scroll with the finger in the previous edge */
-		if (t->scroll.edge && (tp_touch_get_edge(tp, t) & t->scroll.edge) == 0)
-			continue;
+		/* only scroll with the finger in the previous edge, unless it
+		 * keeps going around in a circle */
+		if (t->scroll.edge && !t->scroll.circular &&
+		    (tp_touch_get_edge(tp, t) & t->scroll.edge) == 0) {
+			if (!tp->scroll.circular ||
+			    t->scroll.edge_state != EDGE_SCROLL_TOUCH_STATE_EDGE)
+				continue;
+			t->scroll.circular = true;
+		}
 
 		switch (t->scroll.edge) {
 		case EDGE_NONE:
@@ -466,8 +507,20 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, usec_t time)
 			break;
 		}
 
+		if (t->scroll.circular) {
+			double circular = tp_edge_scroll_circular_delta(tp, t, &normalized);
+
+			normalized = zero;
+			*delta = axis == LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL ? circular
+									      : -circular;
+		}
+
 		if (*delta == 0.0)
 			continue;
+
+		if (tp->scroll.edge_natural != -1 &&
+		    tp->scroll.edge_natural != (int)device->scroll.natural_scrolling_enabled)
+			*delta = -*delta;
 
 		evdev_notify_axis_finger(device, time, bit(axis), &normalized);
 		t->scroll.direction = axis;
@@ -496,6 +549,7 @@ tp_edge_scroll_stop_events(struct tp_dispatch *tp, usec_t time)
 			 * state machine with special case handling */
 			t->scroll.edge = EDGE_NONE;
 			t->scroll.edge_state = EDGE_SCROLL_TOUCH_STATE_AREA;
+			t->scroll.circular = false;
 		}
 	}
 }

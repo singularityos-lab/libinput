@@ -827,6 +827,283 @@ START_TEST(touchpad_edge_scroll_horiz_clickpad)
 }
 END_TEST
 
+static void
+enable_2fg_and_edge_scroll(struct litest_device *dev)
+{
+	enum libinput_config_status status;
+
+	status = libinput_device_config_scroll_set_method(
+		dev->libinput_device,
+		LIBINPUT_CONFIG_SCROLL_2FG | LIBINPUT_CONFIG_SCROLL_EDGE);
+	litest_assert_enum_eq(status, LIBINPUT_CONFIG_STATUS_SUCCESS);
+	litest_assert_enum_eq(libinput_device_config_scroll_get_method(
+				      dev->libinput_device),
+			      LIBINPUT_CONFIG_SCROLL_2FG | LIBINPUT_CONFIG_SCROLL_EDGE);
+	libinput_device_config_scroll_set_natural_scroll_enabled(dev->libinput_device,
+								 0);
+}
+
+/* Counts scroll events on the axis moving in the sign's direction and fails
+ * on anything else, including pointer motion. */
+static int
+count_scroll_events(struct libinput *li, enum libinput_pointer_axis axis, int sign)
+{
+	struct libinput_event *event;
+	int count = 0;
+
+	litest_dispatch(li);
+	while ((event = libinput_get_event(li))) {
+		if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_AXIS) {
+			libinput_event_destroy(event);
+			continue;
+		}
+
+		struct libinput_event_pointer *ptrev =
+			litest_is_axis_event(event,
+					     LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+					     axis,
+					     LIBINPUT_POINTER_AXIS_SOURCE_FINGER);
+		double value = libinput_event_pointer_get_scroll_value(ptrev, axis);
+
+		litest_assert(value * sign >= 0);
+		if (value != 0)
+			count++;
+		libinput_event_destroy(event);
+	}
+
+	return count;
+}
+
+START_TEST(touchpad_2fg_and_edge_scroll)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+
+	if (!litest_has_2fg_scroll(dev))
+		return LITEST_NOT_APPLICABLE;
+
+	enable_2fg_and_edge_scroll(dev);
+	litest_disable_hold_gestures(dev->libinput_device);
+	litest_drain_events(li);
+
+	litest_touch_down(dev, 0, 99, 20);
+	litest_touch_move_to(dev, 0, 99, 20, 99, 80, 10);
+	litest_touch_up(dev, 0);
+	litest_dispatch(li);
+	litest_assert_scroll(li,
+			     LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+			     LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+			     4);
+	litest_assert_empty_queue(li);
+
+	test_2fg_scroll(dev, 0.1, 40, false);
+	litest_assert_scroll(li,
+			     LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+			     LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+			     9);
+	litest_assert_empty_queue(li);
+}
+END_TEST
+
+START_TEST(touchpad_2fg_and_edge_scroll_2fg_on_edge)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+
+	if (!litest_has_2fg_scroll(dev))
+		return LITEST_NOT_APPLICABLE;
+
+	enable_2fg_and_edge_scroll(dev);
+	litest_disable_hold_gestures(dev->libinput_device);
+	litest_drain_events(li);
+
+	/* One of the two fingers lands inside the right edge */
+	litest_touch_down(dev, 0, 97, 30);
+	litest_touch_down(dev, 1, 85, 30);
+	litest_touch_move_two_touches(dev, 97, 30, 85, 30, 0, 40, 10);
+	litest_touch_up(dev, 1);
+	litest_touch_up(dev, 0);
+	litest_dispatch(li);
+
+	litest_assert_scroll(li,
+			     LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+			     LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+			     9);
+	litest_assert_empty_queue(li);
+}
+END_TEST
+
+START_TEST(touchpad_2fg_and_edge_scroll_pointer_motion)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+
+	if (!litest_has_2fg_scroll(dev))
+		return LITEST_NOT_APPLICABLE;
+
+	enable_2fg_and_edge_scroll(dev);
+	litest_drain_events(li);
+
+	litest_touch_down(dev, 0, 40, 40);
+	litest_touch_move_to(dev, 0, 40, 40, 60, 60, 10);
+	litest_touch_up(dev, 0);
+	litest_dispatch(li);
+
+	litest_assert_only_typed_events(li, LIBINPUT_EVENT_POINTER_MOTION);
+}
+END_TEST
+
+START_TEST(touchpad_edge_natural_scroll_independent)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+	enum libinput_config_status status;
+
+	if (!litest_has_2fg_scroll(dev))
+		return LITEST_NOT_APPLICABLE;
+
+	enable_2fg_and_edge_scroll(dev);
+	litest_disable_hold_gestures(dev->libinput_device);
+	libinput_device_config_scroll_set_natural_scroll_enabled(dev->libinput_device,
+								 1);
+	status = libinput_device_config_scroll_set_edge_natural_scroll_enabled(
+		dev->libinput_device,
+		0);
+	litest_assert_enum_eq(status, LIBINPUT_CONFIG_STATUS_SUCCESS);
+	litest_assert_int_eq(libinput_device_config_scroll_get_edge_natural_scroll_enabled(
+				     dev->libinput_device),
+			     0);
+	litest_drain_events(li);
+
+	litest_touch_down(dev, 0, 99, 20);
+	litest_touch_move_to(dev, 0, 99, 20, 99, 80, 10);
+	litest_touch_up(dev, 0);
+	litest_dispatch(li);
+	litest_assert_scroll(li,
+			     LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+			     LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+			     4);
+
+	test_2fg_scroll(dev, 0.1, 40, false);
+	litest_assert_scroll(li,
+			     LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+			     LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+			     -9);
+	litest_assert_empty_queue(li);
+}
+END_TEST
+
+START_TEST(touchpad_edge_natural_scroll_follows_natural)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+
+	litest_enable_edge_scroll(dev);
+	libinput_device_config_scroll_set_natural_scroll_enabled(dev->libinput_device,
+								 1);
+	litest_assert_int_eq(libinput_device_config_scroll_get_edge_natural_scroll_enabled(
+				     dev->libinput_device),
+			     1);
+	litest_drain_events(li);
+
+	litest_touch_down(dev, 0, 99, 20);
+	litest_touch_move_to(dev, 0, 99, 20, 99, 80, 10);
+	litest_touch_up(dev, 0);
+	litest_dispatch(li);
+	litest_assert_scroll(li,
+			     LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+			     LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+			     -4);
+	litest_assert_empty_queue(li);
+}
+END_TEST
+
+START_TEST(touchpad_circular_scroll_vert)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+	bool circular = litest_test_param_get_bool(test_env->params, "circular");
+
+	litest_enable_edge_scroll(dev);
+	litest_assert_enum_eq(libinput_device_config_scroll_set_circular_enabled(
+				      dev->libinput_device,
+				      circular),
+			      LIBINPUT_CONFIG_STATUS_SUCCESS);
+	litest_assert_int_eq(libinput_device_config_scroll_get_circular_enabled(
+				     dev->libinput_device),
+			     circular);
+	litest_drain_events(li);
+
+	litest_touch_down(dev, 0, 99, 40);
+	litest_touch_move_to(dev, 0, 99, 40, 99, 60, 10);
+	litest_assert_int_gt(count_scroll_events(li,
+						 LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+						 1),
+			     0);
+
+	/* Leave the edge going clockwise around the center */
+	litest_touch_move_to(dev, 0, 99, 60, 80, 75, 10);
+	count_scroll_events(li, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL, 1);
+	litest_touch_move_to(dev, 0, 80, 75, 65, 85, 10);
+	litest_touch_move_to(dev, 0, 65, 85, 45, 88, 10);
+	if (circular)
+		litest_assert_int_gt(count_scroll_events(li,
+							 LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+							 1),
+				     5);
+	else
+		litest_assert_empty_queue(li);
+
+	/* Reversing direction scrolls back up */
+	litest_touch_move_to(dev, 0, 45, 88, 65, 85, 10);
+	litest_touch_move_to(dev, 0, 65, 85, 80, 75, 10);
+	if (circular)
+		litest_assert_int_gt(count_scroll_events(li,
+							 LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+							 -1),
+				     5);
+	else
+		litest_assert_empty_queue(li);
+
+	litest_touch_up(dev, 0);
+	litest_drain_events(li);
+}
+END_TEST
+
+START_TEST(touchpad_circular_scroll_horiz)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+
+	if (!touchpad_has_horiz_edge_scroll_size(dev))
+		return LITEST_NOT_APPLICABLE;
+
+	litest_enable_edge_scroll(dev);
+	libinput_device_config_scroll_set_circular_enabled(dev->libinput_device, 1);
+	litest_drain_events(li);
+
+	litest_touch_down(dev, 0, 30, 99);
+	litest_touch_move_to(dev, 0, 30, 99, 50, 99, 10);
+	litest_assert_int_gt(count_scroll_events(li,
+						 LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL,
+						 1),
+			     0);
+
+	/* Leave the edge going counter-clockwise, up the right side */
+	litest_touch_move_to(dev, 0, 50, 99, 65, 80, 10);
+	count_scroll_events(li, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL, 1);
+	litest_touch_move_to(dev, 0, 65, 80, 75, 70, 10);
+	litest_touch_move_to(dev, 0, 75, 70, 82, 55, 10);
+	litest_assert_int_gt(count_scroll_events(li,
+						 LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL,
+						 1),
+			     5);
+
+	litest_touch_up(dev, 0);
+	litest_drain_events(li);
+}
+END_TEST
+
 START_TEST(touchpad_edge_scroll_no_horiz)
 {
 	struct litest_device *dev = litest_current_device();
@@ -7108,6 +7385,15 @@ TEST_COLLECTION(touchpad)
 	litest_add(touchpad_edge_scroll_horiz, LITEST_TOUCHPAD, LITEST_CLICKPAD);
 	litest_add(touchpad_edge_scroll_horiz_clickpad, LITEST_CLICKPAD, LITEST_ANY);
 	litest_add(touchpad_edge_scroll_no_horiz, LITEST_TOUCHPAD, LITEST_CLICKPAD);
+	litest_add(touchpad_2fg_and_edge_scroll, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH|LITEST_SEMI_MT);
+	litest_add(touchpad_2fg_and_edge_scroll_2fg_on_edge, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH|LITEST_SEMI_MT);
+	litest_add(touchpad_2fg_and_edge_scroll_pointer_motion, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH|LITEST_SEMI_MT);
+	litest_add(touchpad_edge_natural_scroll_independent, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH|LITEST_SEMI_MT);
+	litest_add(touchpad_edge_natural_scroll_follows_natural, LITEST_TOUCHPAD, LITEST_ANY);
+	litest_with_parameters(params, "circular", 'b') {
+		litest_add_parametrized(touchpad_circular_scroll_vert, LITEST_TOUCHPAD, LITEST_ANY, params);
+	}
+	litest_add(touchpad_circular_scroll_horiz, LITEST_TOUCHPAD, LITEST_CLICKPAD);
 	litest_add(touchpad_edge_scroll_no_motion, LITEST_TOUCHPAD, LITEST_ANY);
 	litest_add(touchpad_edge_scroll_no_edge_after_motion, LITEST_TOUCHPAD, LITEST_ANY);
 	litest_add(touchpad_edge_scroll_timeout, LITEST_TOUCHPAD, LITEST_ANY);

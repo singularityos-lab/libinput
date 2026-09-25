@@ -3133,6 +3133,69 @@ tp_scroll_config_natural_get_default(struct libinput_device *device)
 					     QUIRK_MODEL_APPLE_TOUCHPAD_ONEBUTTON));
 }
 
+static struct tp_dispatch *
+tp_dispatch_for_device(struct libinput_device *device)
+{
+	struct evdev_device *evdev = evdev_device(device);
+
+	if (evdev->dispatch->dispatch_type != DISPATCH_TOUCHPAD)
+		return NULL;
+
+	return (struct tp_dispatch *)evdev->dispatch;
+}
+
+LIBINPUT_EXPORT enum libinput_config_status
+libinput_device_config_scroll_set_edge_natural_scroll_enabled(
+	struct libinput_device *device,
+	int enable)
+{
+	struct tp_dispatch *tp = tp_dispatch_for_device(device);
+
+	if (!tp)
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+
+	tp->scroll.edge_natural = enable ? 1 : 0;
+
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+LIBINPUT_EXPORT int
+libinput_device_config_scroll_get_edge_natural_scroll_enabled(
+	struct libinput_device *device)
+{
+	struct tp_dispatch *tp = tp_dispatch_for_device(device);
+
+	if (!tp)
+		return 0;
+
+	if (tp->scroll.edge_natural == -1)
+		return libinput_device_config_scroll_get_natural_scroll_enabled(device);
+
+	return tp->scroll.edge_natural;
+}
+
+LIBINPUT_EXPORT enum libinput_config_status
+libinput_device_config_scroll_set_circular_enabled(struct libinput_device *device,
+						   int enable)
+{
+	struct tp_dispatch *tp = tp_dispatch_for_device(device);
+
+	if (!tp)
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+
+	tp->scroll.circular = enable ? true : false;
+
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+LIBINPUT_EXPORT int
+libinput_device_config_scroll_get_circular_enabled(struct libinput_device *device)
+{
+	struct tp_dispatch *tp = tp_dispatch_for_device(device);
+
+	return tp && tp->scroll.circular ? 1 : 0;
+}
+
 static void
 tp_init_scroll(struct tp_dispatch *tp, struct evdev_device *device)
 {
@@ -3152,6 +3215,8 @@ tp_init_scroll(struct tp_dispatch *tp, struct evdev_device *device)
 	tp->scroll.config_method.get_default_method =
 		tp_scroll_config_scroll_method_get_default_method;
 	tp->scroll.method = tp_scroll_get_default_method(tp);
+	tp->scroll.edge_natural = -1;
+	tp->scroll.circular = false;
 	tp->device->base.config.scroll_method = &tp->scroll.config_method;
 
 	/* In mm for touchpads with valid resolution, see tp_init_accel() */
